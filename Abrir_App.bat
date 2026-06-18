@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 chcp 65001 > nul
 title FIP 606 - Analise Estatistica
 echo =======================================================
@@ -24,5 +24,5 @@ echo O seu navegador ira abrir automaticamente em instantes.
 echo AVISO: Nao feche esta janela preta enquanto estiver usando o aplicativo!
 echo.
 
-"%RSCRIPT%" -e "shiny::runApp('%~dp0app_analises_estatisticas.R', launch.browser=TRUE)"
+"%RSCRIPT%" -e "shiny::runApp('%~dp0myapp\app.R', launch.browser=TRUE)"
 
