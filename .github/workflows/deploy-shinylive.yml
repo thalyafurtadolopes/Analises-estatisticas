@@ -31,7 +31,10 @@ jobs:
           r-version: 'release'
 
       - name: Install shinylive
-        run: Rscript -e "install.packages('shinylive', repos='https://cran.rstudio.com/')"
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            cran::shinylive
 
       - name: Build shinylive app
         run: Rscript -e "shinylive::export('myapp', '_site')"
