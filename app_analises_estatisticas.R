@@ -27,6 +27,8 @@ try(library(agricolae), silent = TRUE)
 try(library(MASS), silent = TRUE)
 try(library(report), silent = TRUE)
 try(library(FSA), silent = TRUE)
+try(library(openxlsx), silent = TRUE)
+try(library(base64enc), silent = TRUE)
 
 # =============================================================================
 # TEMA E ESTILO
@@ -153,7 +155,7 @@ ui <- page_navbar(
   title = span(
     img(src = "https://cdn-icons-png.flaticon.com/512/2920/2920349.png",
         height = "28px", style = "margin-right: 8px;"),
-    "FIP 606 — Análise de Dados"
+    "Análise de Dados"
   ),
   theme   = tema_app,
   id      = "main_nav",
@@ -162,6 +164,27 @@ ui <- page_navbar(
     bg        = "#2C7A4B",
     theme     = "dark"
   ),
+  header = tags$head(
+    tags$style(HTML("
+      /* Value boxes — fontes maiores e harmônicas */
+      .bslib-value-box .value-box-value {
+        font-size: 2.6rem !important;
+        font-weight: 700 !important;
+        line-height: 1.1 !important;
+      }
+      .bslib-value-box .value-box-title {
+        font-size: 1.05rem !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.03em !important;
+        text-transform: uppercase !important;
+        opacity: 0.92 !important;
+      }
+      .bslib-value-box .value-box-showcase {
+        font-size: 2.8rem !important;
+      }
+    "))
+  ),
+
 
   # ===========================================================================
   # ABA 0 — HOME / INÍCIO
@@ -174,7 +197,7 @@ ui <- page_navbar(
       card_header(
         span(
           img(src = "https://cdn-icons-png.flaticon.com/512/2920/2920349.png", height = "32px", style = "margin-right: 8px;"),
-          span("FIP 606 — Análise Estatística Interativa", style = "font-size: 1.3rem; font-weight: 700; color: #2C7A4B;")
+          span("Análise Estatística Interativa", style = "font-size: 1.3rem; font-weight: 700; color: #2C7A4B;")
         ),
         class = "bg-light"
       ),
@@ -299,19 +322,16 @@ ui <- page_navbar(
                   theme = value_box_theme(bg = "#84BD9B", fg = "white"))
       ),
       br(),
-      card(
-        card_header("📋 Prévia dos Dados", class = "bg-light"),
-        card_body(
-          DTOutput("tabela_preview"),
-          min_height = "350px"
-        )
-      ),
-      br(),
-      card(
-        card_header("🔍 Estrutura das Variáveis", class = "bg-light"),
-        card_body(
-          verbatimTextOutput("estrutura_dados"),
-          min_height = "120px"
+      accordion(
+        id = "accordion_dados",
+        open = FALSE,
+        accordion_panel(
+          title = "📋 Prévia dos Dados",
+          DTOutput("tabela_preview")
+        ),
+        accordion_panel(
+          title = "🔍 Estrutura das Variáveis",
+          verbatimTextOutput("estrutura_dados")
         )
       )
     )
@@ -386,7 +406,11 @@ ui <- page_navbar(
         width = 280, bg = "white",
         title = "🧪 Configuração",
 
-        selectInput("var_resp_tt", "Variável resposta:", choices = NULL),
+        checkboxInput("usar_audpc_tt", "🌱 Usar AUDPC como variável Y", FALSE),
+        conditionalPanel(
+          condition = "input.usar_audpc_tt == false",
+          selectInput("var_resp_tt", "Variável resposta:", choices = NULL)
+        ),
         selectInput("var_grupo_tt", "Fator (2 grupos):", choices = NULL),
 
         hr(),
@@ -475,8 +499,12 @@ ui <- page_navbar(
         width = 280, bg = "white",
         title = "📐 Modelo",
 
-        selectInput("var_resp_av", "Variável resposta:", choices = NULL),
-        
+        checkboxInput("usar_audpc_av", "🌱 Usar AUDPC como variável Y", FALSE),
+        conditionalPanel(
+          condition = "input.usar_audpc_av == false",
+          selectInput("var_resp_av", "Variável resposta:", choices = NULL)
+        ),
+
         conditionalPanel(
           condition = "input.delineamento == 'dic' || input.delineamento == 'dbc'",
           selectInput("var_trat_av", "Tratamento (fator principal):", choices = NULL)
@@ -676,7 +704,11 @@ ui <- page_navbar(
         width = 280, bg = "white",
         title = "🦠 Dados de Contagem",
 
-        selectInput("var_resp_glm", "Variável resposta (contagem):", choices = NULL),
+        checkboxInput("usar_audpc_glm", "🌱 Usar AUDPC como variável Y", FALSE),
+        conditionalPanel(
+          condition = "input.usar_audpc_glm == false",
+          selectInput("var_resp_glm", "Variável resposta (contagem):", choices = NULL)
+        ),
         selectInput("var_grupo_glm", "Fator:", choices = NULL),
 
         hr(),
@@ -784,7 +816,11 @@ ui <- page_navbar(
       sidebar = sidebar(
         width = 280, bg = "white",
         title = "🧪 Configuração",
-        selectInput("var_resp_np", "Variável resposta:", choices = NULL),
+        checkboxInput("usar_audpc_np", "🌱 Usar AUDPC como variável Y", FALSE),
+        conditionalPanel(
+          condition = "input.usar_audpc_np == false",
+          selectInput("var_resp_np", "Variável resposta:", choices = NULL)
+        ),
         selectInput("var_grupo_np", "Fator (Agrupamento):", choices = NULL),
         hr(),
         h6("Tipo de teste"),
@@ -843,11 +879,12 @@ ui <- page_navbar(
         title = "🎨 Customização",
         selectInput("fonte_grafico", "Origem dos Dados:",
                     choices = c(
-                      "📐 ANOVA (Aba 4)"                   = "anova",
-                      "🧪 Teste t / Wilcoxon (Aba 3)"      = "teste_t",
-                      "📈 Regressão / Correlação (Aba 5)"  = "regressao",
-                      "🦠 GLM Poisson (Aba 6)"             = "glm",
-                      "⚖️ Não Paramétricos (Aba 8)"        = "nao_param"
+                      "📐 ANOVA"                   = "anova",
+                      "🧪 Teste t / Wilcoxon"      = "teste_t",
+                      "📈 Regressão / Correlação"  = "regressao",
+                      "🦠 GLM"             = "glm",
+                      "⚖️ Não Paramétricos"        = "nao_param",
+                      "🌱 AUDPC"                   = "audpc"
                     )
         ),
         hr(),
@@ -880,6 +917,126 @@ ui <- page_navbar(
         )
       )
     )
+  ),
+
+  # ===========================================================================
+  # ABA 10 E 11 — RELATÓRIO E EXPORTAR (AGRUPADOS)
+  # ===========================================================================
+  nav_menu(
+    title = "Saída e Exportação",
+    icon = icon("save"),
+
+    nav_panel(
+      title = tagList(icon("file-alt"), " Relatório"),
+      value = "tab_relatorio",
+
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 310, bg = "white",
+        title = "📄 Configurações do Relatório",
+
+        h6("📝 Identificação"),
+        textInput("rel_titulo",      "Título do Experimento:",
+                  value = "Análise Estatística — FIP 606"),
+        textInput("rel_autor",       "Autor(es):",        value = ""),
+        textInput("rel_instituicao", "Instituição:",      value = "UFV — FIP 606"),
+        textInput("rel_data",        "Data:",
+                  value = format(Sys.Date(), "%d/%m/%Y")),
+
+        hr(),
+        h6("☑️ Seções a incluir"),
+        checkboxInput("rel_inc_dados",   "📋 Resumo dos Dados",            TRUE),
+        checkboxInput("rel_inc_exp",     "📊 Exploração / Descritiva",     TRUE),
+        checkboxInput("rel_inc_tt",      "🧪 Teste t / Wilcoxon",          TRUE),
+        checkboxInput("rel_inc_anova",   "📐 ANOVA",                        TRUE),
+        checkboxInput("rel_inc_reg",     "📈 Regressão / Correlação",      TRUE),
+        checkboxInput("rel_inc_glm",     "🦠 GLM",                          TRUE),
+        checkboxInput("rel_inc_np",      "⚖️ Não Paramétricos",            TRUE),
+        checkboxInput("rel_inc_audpc",   "🌱 AUDPC",                        TRUE),
+        checkboxInput("rel_inc_graficos","🎨 Gráfico Customizado (Editor)", TRUE),
+
+        hr(),
+        actionButton("gerar_relatorio", "▶ Gerar Relatório",
+                     class = "btn-success w-100", icon = icon("cogs")),
+        br(), br(),
+        downloadButton("download_html", "⬇ Baixar HTML",
+                       class = "btn-primary w-100"),
+        br(), br(),
+        div(class = "alert alert-info p-2", style = "font-size:0.82rem;",
+            icon("info-circle"),
+            " O arquivo HTML é auto-contido. ",
+            "Para gerar PDF, baixe o HTML, abra-o no seu navegador e use ", tags$b("Ctrl+P (Imprimir -> Salvar como PDF)."))
+      ),
+
+      card(
+        full_screen = TRUE,
+        card_header("👁️ Pré-visualização do Relatório"),
+        card_body(
+          uiOutput("status_relatorio"),
+          uiOutput("preview_relatorio_iframe",
+                     style = "border:1px solid #dee2e6; border-radius:6px; background:white; padding:5px;")
+        )
+      )
+    )
+  ),
+
+  # ===========================================================================
+  # ABA 11 — EXPORTAR DADOS
+  # ===========================================================================
+  nav_panel(
+    title = tagList(icon("download"), " Exportar"),
+    value = "tab_exportar",
+
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 300, bg = "white",
+        title = "📦 O que exportar?",
+
+        h6("Selecione a tabela:"),
+        radioButtons("export_fonte", label = NULL,
+          choices = c(
+            "📋 Dados brutos"                = "brutos",
+            "📊 Resumo descritivo (Explorar)"= "resumo",
+            "🧪 Resultados do Teste t"       = "teste_t",
+            "📐 Tabela ANOVA"                = "anova",
+            "📋 Médias ajustadas (emmeans)"  = "emmeans",
+            "📈 Regressão / Correlação"      = "regressao",
+            "🦠 GLM Poisson (Médias)"        = "glm",
+            "🌱 Tabela AUDPC"                = "audpc",
+            "⚖️ Resultados Não Paramétricos" = "nao_param"
+          ),
+          selected = "brutos"
+        ),
+
+        hr(),
+        h6("Formato de exportação:"),
+        radioButtons("export_formato", label = NULL,
+          choices = c("CSV (.csv)" = "csv",
+                      "Excel (.xlsx)" = "xlsx",
+                      "Texto (.txt)" = "txt"),
+          selected = "csv"
+        ),
+
+        conditionalPanel(
+          condition = "input.export_formato == 'csv'",
+          selectInput("export_sep", "Separador:",
+                      choices = c(";" = ";", "," = ",", "Tab" = "\t")),
+          selectInput("export_dec", "Dec. separador:",
+                      choices = c("," = ",", "." = "."))
+        ),
+
+        hr(),
+        downloadButton("download_exportar", "⬇ Baixar Tabela",
+                       class = "btn-success w-100")
+      ),
+
+      card(
+        full_screen = TRUE,
+        card_header("👁️ Pré-visualização da Tabela"),
+        card_body(DTOutput("preview_exportar"))
+      )
+    )
+  )
   ),
 
   # Separador e Info
@@ -1219,10 +1376,23 @@ server <- function(input, output, session) {
   # ---------------------------------------------------------------------------
 
   resultado_tt <- eventReactive(input$rodar_teste, {
-    req(dados(), input$var_resp_tt, input$var_grupo_tt)
-    df  <- dados()
-    var_y <- input$var_resp_tt
-    var_g <- input$var_grupo_tt
+    # --- Suporte a AUDPC ---
+    usar_audpc <- isTRUE(input$usar_audpc_tt)
+    if (usar_audpc) {
+      res_audpc <- audpc_calculada()
+      if (is.null(res_audpc) || !res_audpc$has_rep) {
+        showNotification("⚠️ Calcule a AUDPC com repetição na Aba 7 antes de usar aqui.", type = "warning")
+        return(NULL)
+      }
+      df    <- res_audpc$df_audpc
+      var_y <- "audpc"
+      var_g <- res_audpc$g_col
+    } else {
+      req(dados(), input$var_resp_tt, input$var_grupo_tt)
+      df    <- dados()
+      var_y <- input$var_resp_tt
+      var_g <- input$var_grupo_tt
+    }
 
     grupos <- unique(df[[var_g]])
     if (length(grupos) != 2) {
@@ -1254,6 +1424,7 @@ server <- function(input, output, session) {
       showNotification(paste("Erro:", e$message), type = "error"); NULL
     })
   })
+
 
   output$resultado_cards_tt <- renderUI({
     res_list <- resultado_tt()
@@ -1476,7 +1647,38 @@ server <- function(input, output, session) {
   # ---------------------------------------------------------------------------
 
   resultado_anova <- eventReactive(input$rodar_anova, {
+    # --- Suporte a AUDPC ---
+    usar_audpc <- isTRUE(input$usar_audpc_av)
+    if (usar_audpc) {
+      res_audpc <- audpc_calculada()
+      if (is.null(res_audpc) || !res_audpc$has_rep) {
+        showNotification("⚠️ Calcule a AUDPC com repetição na Aba 7 antes de usar aqui.", type = "warning")
+        return(NULL)
+      }
+      df    <- res_audpc$df_audpc
+      var_y <- "audpc"
+      var_t <- res_audpc$g_col
+      df[[var_t]] <- as.factor(df[[var_t]])
+      transf <- aplicar_transformacao(df[[var_y]], input$transf_av)
+      y_orig <- df[[var_y]]
+      df[[var_y]] <- transf$y
+      formula_str <- paste(var_y, "~", var_t)
+      tryCatch({
+        m   <- aov(as.formula(formula_str), data = df)
+        tbl <- as.data.frame(anova(m))
+        em  <- emmeans(m, as.formula(paste("~", var_t)))
+        cld_res <- multcomp::cld(em, Letters = letters) |> as.data.frame()
+        return(list(modelo = m, tabela = tbl, emmeans = em, cld = cld_res,
+                    df = df, var_y = var_y, var_t = var_t,
+                    y_original = y_orig, y_transf = transf$y,
+                    transf_label = transf$label, transf_tipo = input$transf_av))
+      }, error = function(e) {
+        showNotification(paste("Erro ANOVA AUDPC:", e$message), type = "error"); NULL
+      })
+    }
+
     if (input$delineamento == "fatorial") {
+
       req(dados(), input$var_resp_av, input$fator_principal, input$fator_desdobramento)
       df    <- dados()
       var_y <- input$var_resp_av
@@ -2059,10 +2261,23 @@ server <- function(input, output, session) {
   })
 
   resultado_glm <- eventReactive(input$rodar_glm, {
-    req(dados(), input$var_resp_glm, input$var_grupo_glm)
-    df    <- dados()
-    var_y <- input$var_resp_glm
-    var_g <- input$var_grupo_glm
+    # --- Suporte a AUDPC ---
+    usar_audpc <- isTRUE(input$usar_audpc_glm)
+    if (usar_audpc) {
+      res_audpc <- audpc_calculada()
+      if (is.null(res_audpc) || !res_audpc$has_rep) {
+        showNotification("⚠️ Calcule a AUDPC com repetição na Aba 7 antes de usar aqui.", type = "warning")
+        return(NULL)
+      }
+      df    <- res_audpc$df_audpc
+      var_y <- "audpc"
+      var_g <- res_audpc$g_col
+    } else {
+      req(dados(), input$var_resp_glm, input$var_grupo_glm)
+      df    <- dados()
+      var_y <- input$var_resp_glm
+      var_g <- input$var_grupo_glm
+    }
     df[[var_g]] <- as.factor(df[[var_g]])
     results <- list()
 
@@ -2313,7 +2528,7 @@ server <- function(input, output, session) {
   # ---------------------------------------------------------------------------
   observeEvent(input$about_link, {
     showModal(modalDialog(
-      title = "Sobre o FIP 606 — Análise de Dados",
+      title = "Sobre o app Análise de Dados",
       tagList(
         p("App desenvolvido com base no conteúdo do curso FIP 606."),
         p("Cobre os principais fluxos de análise de dados em fitopatologia e agronomia:"),
@@ -2607,13 +2822,26 @@ server <- function(input, output, session) {
   # ABA 8 — NÃO PARAMÉTRICOS
   # ---------------------------------------------------------------------------
   resultado_np <- eventReactive(input$rodar_np, {
-    req(dados(), input$var_resp_np, input$var_grupo_np)
-    df <- dados()
-    var_y <- input$var_resp_np
-    var_g <- input$var_grupo_np
+    # --- Suporte a AUDPC ---
+    usar_audpc <- isTRUE(input$usar_audpc_np)
+    if (usar_audpc) {
+      res_audpc <- audpc_calculada()
+      if (is.null(res_audpc) || !res_audpc$has_rep) {
+        showNotification("⚠️ Calcule a AUDPC com repetição na Aba 7 antes de usar aqui.", type = "warning")
+        return(NULL)
+      }
+      df    <- res_audpc$df_audpc
+      var_y <- "audpc"
+      var_g <- res_audpc$g_col
+    } else {
+      req(dados(), input$var_resp_np, input$var_grupo_np)
+      df    <- dados()
+      var_y <- input$var_resp_np
+      var_g <- input$var_grupo_np
+    }
     df[[var_g]] <- as.factor(df[[var_g]])
     tipo <- input$tipo_teste_np
-    res <- list(df = df, var_y = var_y, var_g = var_g, tipo = tipo)
+    res  <- list(df = df, var_y = var_y, var_g = var_g, tipo = tipo)
 
     tryCatch({
       if (tipo == "mann") {
@@ -3136,6 +3364,597 @@ server <- function(input, output, session) {
     content = function(file) {
       req(grafico_custom_gerado())
       ggsave(file, plot = grafico_custom_gerado(), width = 10, height = 6, dpi = 300)
+    }
+  )
+
+
+  # ---------------------------------------------------------------------------
+  # ABA 10 — RELATÓRIO HTML
+  # ---------------------------------------------------------------------------
+
+  # Função interna: converte um ggplot para string base64 PNG embutida em <img>
+  gg_para_img_html <- function(p, width = 800, height = 450, res = 120) {
+    tmp <- tempfile(fileext = ".png")
+    tryCatch({
+      ggplot2::ggsave(tmp, plot = p, width = width / res, height = height / res,
+                      dpi = res, bg = "white")
+      b64 <- base64enc::base64encode(tmp)
+      paste0('<img src="data:image/png;base64,', b64,
+             '" style="max-width:100%;border-radius:6px;margin:10px 0;" />')
+    }, error = function(e) {
+      paste0('<p style="color:red;">Gráfico indisponível: ', e$message, '</p>')
+    }, finally = {
+      if (file.exists(tmp)) unlink(tmp)
+    })
+  }
+
+  # Bloco HTML estilizado de seção
+  secao_html <- function(titulo, conteudo_html, cor = "#2C7A4B") {
+    paste0(
+      '<div style="margin-bottom:2rem;border-left:5px solid ', cor,
+      ';padding-left:1.2rem;">',
+      '<h2 style="color:', cor, ';font-family:Outfit,sans-serif;font-size:1.3rem;">',
+      titulo, '</h2>', conteudo_html, '</div>'
+    )
+  }
+
+  # Converte data.frame para tabela HTML simples
+  df_para_html <- function(df, digits = 4) {
+    if (is.null(df) || nrow(df) == 0) return('<p><em>Sem dados disponíveis.</em></p>')
+    df <- as.data.frame(df)
+    # arredonda numérico
+    df <- df |> dplyr::mutate(dplyr::across(dplyr::where(is.numeric),
+                                             ~round(., digits)))
+    rows <- apply(df, 1, function(r) {
+      paste0('<tr>', paste0('<td style="padding:4px 10px;border:1px solid #dee2e6;">',
+                            r, '</td>', collapse = ''), '</tr>')
+    })
+    header <- paste0('<tr style="background:#2C7A4B;color:white;">',
+                     paste0('<th style="padding:6px 10px;border:1px solid #dee2e6;">',
+                            names(df), '</th>', collapse = ''), '</tr>')
+    paste0(
+      '<div style="overflow-x:auto;"><table style="border-collapse:collapse;',
+      'width:100%;font-size:0.88rem;font-family:Inter,sans-serif;">',
+      header, paste(rows, collapse = ''), '</table></div>'
+    )
+  }
+
+  relatorio_html_conteudo <- reactiveVal(NULL)
+
+  observeEvent(input$gerar_relatorio, {
+    relatorio_html_conteudo(NULL)  # reset
+
+    partes <- list()
+
+    # ---- Cabeçalho ----
+    autor_html <- ""
+    if (!is.null(input$rel_autor) && trimws(input$rel_autor) != "") {
+      autor_html <- paste0('<strong>', htmltools::htmlEscape(trimws(input$rel_autor)), '</strong> &bull; ')
+    }
+    
+    partes[[length(partes) + 1]] <- paste0(
+      '<div style="text-align:center;padding:2rem 0 1rem;">',
+      '<h1 style="color:#2C7A4B;font-family:Outfit,sans-serif;font-size:2rem;">',
+      htmltools::htmlEscape(input$rel_titulo), '</h1>',
+      '<p style="font-size:1rem;color:#636e72;">',
+      autor_html,
+      htmltools::htmlEscape(input$rel_instituicao), ' &bull; ',
+      htmltools::htmlEscape(input$rel_data),
+      '</p><hr style="border-color:#2C7A4B;"/></div>'
+    )
+
+    # ---- Seção: Dados ----
+    if (isTRUE(input$rel_inc_dados) && !is.null(dados())) {
+      df <- dados()
+      info <- paste0(
+        '<ul style="font-size:0.95rem;">',
+        '<li><strong>Observações:</strong> ', nrow(df), '</li>',
+        '<li><strong>Variáveis:</strong> ', ncol(df), '</li>',
+        '<li><strong>Colunas:</strong> ', paste(names(df), collapse = ', '), '</li>',
+        '</ul>'
+      )
+      # Primeiras 15 linhas
+      prev <- df_para_html(head(df, 15))
+      partes[[length(partes) + 1]] <- secao_html(
+        "📋 Resumo dos Dados",
+        paste0(info, '<p><em>Primeiras linhas:</em></p>', prev)
+      )
+    }
+
+    # ---- Seção: Exploração ----
+    if (isTRUE(input$rel_inc_exp) && !is.null(dados()) &&
+        !is.null(input$var_resp_exp) && input$var_resp_exp != "") {
+      tryCatch({
+        df <- dados_transf()
+        var_y <- if (input$transf_exp == "none") input$var_resp_exp else
+          paste0(input$var_resp_exp, "_transf")
+        usar_grupo <- !is.null(input$var_grupo_exp) && input$var_grupo_exp != ""
+
+        p <- ggplot(df, aes(
+          x = if (usar_grupo) .data[[input$var_grupo_exp]] else factor("Todos"),
+          y = .data[[var_y]],
+          fill = if (usar_grupo) .data[[input$var_grupo_exp]] else NULL
+        )) +
+          stat_summary(fun = mean, geom = "col", alpha = 0.8, color = "white") +
+          stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2,
+                       linewidth = 0.8, color = "black") +
+          geom_jitter(width = 0.12, alpha = 0.6, size = 2.2) +
+          scale_fill_brewer(palette = "Set2") +
+          labs(x = if (usar_grupo) input$var_grupo_exp else "",
+               y = var_y, fill = NULL) +
+          theme_minimal(base_size = 12) +
+          theme(legend.position = "none", panel.grid.minor = element_blank())
+
+        img_html <- gg_para_img_html(p)
+        partes[[length(partes) + 1]] <- secao_html("📊 Exploração / Descritiva", img_html)
+      }, error = function(e) NULL)
+    }
+
+    # ---- Seção: Teste t ----
+    if (isTRUE(input$rel_inc_tt)) {
+      tryCatch({
+        res <- resultado_tt()
+        if (!is.null(res)) {
+          r   <- res$resultado
+          pv  <- r$p.value
+          sig <- if (!is.na(pv) && pv < 0.05) "✅ Significativo" else "❌ Não significativo"
+          info <- paste0(
+            '<ul style="font-size:0.93rem;">',
+            '<li><strong>Teste:</strong> ', r$method, '</li>',
+            '<li><strong>Estatística:</strong> ',
+              names(r$statistic), ' = ', round(r$statistic, 4), '</li>',
+            if (!is.null(r$parameter))
+              paste0('<li><strong>GL:</strong> ', round(r$parameter, 2), '</li>')
+            else '',
+            '<li><strong>p-valor:</strong> ', formatC(pv, digits=4, format="g"), '</li>',
+            '<li><strong>Conclusão:</strong> ', sig, '</li>',
+            '</ul>'
+          )
+          # Gráfico boxplot dos grupos
+          df <- res$df; vy <- res$var_y; vg <- res$var_g
+          p <- ggplot(df, aes(x = .data[[vg]], y = .data[[vy]],
+                              fill = .data[[vg]])) +
+            geom_boxplot(alpha = 0.55, outlier.colour = NA, color = "black") +
+            geom_jitter(width = 0.12, alpha = 0.6, size = 2) +
+            scale_fill_brewer(palette = "Set2") +
+            labs(x = vg, y = vy, fill = NULL) +
+            theme_minimal(base_size = 12) +
+            theme(legend.position = "none")
+          img_html <- gg_para_img_html(p)
+          partes[[length(partes) + 1]] <- secao_html(
+            "🧪 Teste t / Wilcoxon",
+            paste0(info, img_html)
+          )
+        }
+      }, error = function(e) NULL)
+    }
+
+    # ---- Seção: ANOVA ----
+    if (isTRUE(input$rel_inc_anova)) {
+      tryCatch({
+        res <- resultado_anova()
+        if (!is.null(res)) {
+          tbl_av <- res$tabela |>
+            dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~round(., 4)))
+          tbl_em <- as.data.frame(res$cld) |>
+            dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~round(., 3)))
+
+          cld <- res$cld
+          cld$.group <- trimws(cld$.group)
+          ci_lower <- if ("lower.CL" %in% colnames(cld)) "lower.CL" else
+            if ("asymp.LCL" %in% colnames(cld)) "asymp.LCL" else NULL
+          ci_upper <- if ("upper.CL" %in% colnames(cld)) "upper.CL" else
+            if ("asymp.UCL" %in% colnames(cld)) "asymp.UCL" else NULL
+          if (!is.null(ci_lower) && ci_lower %in% colnames(cld) && ci_lower != "lower.CL")
+            cld$lower.CL <- cld[[ci_lower]]
+          if (!is.null(ci_upper) && ci_upper %in% colnames(cld) && ci_upper != "upper.CL")
+            cld$upper.CL <- cld[[ci_upper]]
+
+          p <- if ("lower.CL" %in% colnames(cld)) {
+            ggplot(cld, aes(x = reorder(.data[[res$var_t]], emmean), y = emmean)) +
+              geom_point(size = 3.5, color = "#2C7A4B") +
+              geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL),
+                            width = 0.15, color = "#2C7A4B", linewidth = 0.8) +
+              geom_text(aes(label = .group, y = upper.CL),
+                        vjust = -0.8, fontface = "bold", size = 4, color = "#2C7A4B") +
+              coord_flip() +
+              labs(x = res$var_t, y = paste0("Média ajustada — ", res$var_y)) +
+              theme_minimal(base_size = 12) +
+              theme(panel.grid.minor = element_blank())
+          } else NULL
+
+          img_html <- if (!is.null(p)) gg_para_img_html(p) else ""
+          partes[[length(partes) + 1]] <- secao_html(
+            "📐 ANOVA",
+            paste0(
+              '<h3 style="font-size:1rem;color:#555;">Tabela ANOVA</h3>',
+              df_para_html(tbl_av),
+              '<h3 style="font-size:1rem;color:#555;margin-top:1rem;">Médias Ajustadas (emmeans)</h3>',
+              df_para_html(tbl_em),
+              img_html
+            )
+          )
+        }
+      }, error = function(e) NULL)
+    }
+
+    # ---- Seção: Regressão ----
+    if (isTRUE(input$rel_inc_reg)) {
+      tryCatch({
+        res_list <- resultado_reg()
+        if (!is.null(res_list)) {
+          df <- res_list$df; x <- res_list$x; y <- res_list$y
+          formula_smooth <- switch(input$tipo_reg,
+            poly2 = y ~ poly(x, 2), poly3 = y ~ poly(x, 3), y ~ x)
+          p <- ggplot(df, aes(x = .data[[x]], y = .data[[y]])) +
+            geom_point(alpha = 0.7, size = 2.5, color = "#2C7A4B") +
+            geom_smooth(method = "lm", formula = formula_smooth,
+                        se = TRUE, color = "#2C7A4B", fill = "#2C7A4B", alpha = 0.15) +
+            labs(x = x, y = y) +
+            theme_minimal(base_size = 12) +
+            theme(panel.grid.minor = element_blank())
+
+          if (res_list$tipo == "cor") {
+            r <- res_list$res
+            info <- paste0(
+              '<ul style="font-size:0.93rem;">',
+              '<li><strong>Método:</strong> ', r$method, '</li>',
+              '<li><strong>r:</strong> ', round(r$estimate, 4), '</li>',
+              '<li><strong>p-valor:</strong> ', formatC(r$p.value, digits=4, format="g"), '</li>',
+              '</ul>'
+            )
+          } else {
+            gl <- res_list$glance
+            info <- paste0(
+              '<ul style="font-size:0.93rem;">',
+              '<li><strong>R²:</strong> ', round(gl$r.squared, 4), '</li>',
+              '<li><strong>R² ajustado:</strong> ', round(gl$adj.r.squared, 4), '</li>',
+              '<li><strong>F:</strong> ', round(gl$statistic, 3), '</li>',
+              '<li><strong>p-valor:</strong> ', formatC(gl$p.value, digits=4, format="g"), '</li>',
+              '</ul>'
+            )
+          }
+          img_html <- gg_para_img_html(p)
+          partes[[length(partes) + 1]] <- secao_html(
+            "📈 Regressão / Correlação",
+            paste0(info, img_html)
+          )
+        }
+      }, error = function(e) NULL)
+    }
+
+    # ---- Seção: GLM ----
+    if (isTRUE(input$rel_inc_glm)) {
+      tryCatch({
+        res_list <- resultado_glm()
+        if (!is.null(res_list) && !is.null(res_list$results)) {
+          info_parts <- list()
+          if (!is.null(res_list$results$lm_bruto)) {
+            an <- as.data.frame(anova(res_list$results$lm_bruto$modelo)) |>
+              dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~round(., 4)))
+            info_parts[[length(info_parts)+1]] <-
+              paste0('<h3 style="font-size:1rem;color:#555;">ANOVA Bruta</h3>',
+                     df_para_html(an))
+          }
+          if (!is.null(res_list$results$glm_poisson)) {
+            cld_g <- res_list$results$glm_poisson$cld
+            info_parts[[length(info_parts)+1]] <-
+              paste0('<h3 style="font-size:1rem;color:#555;">GLM Poisson — Médias Estimadas</h3>',
+                     df_para_html(as.data.frame(cld_g)))
+          }
+          partes[[length(partes) + 1]] <- secao_html(
+            "🦠 GLM", paste(info_parts, collapse = "")
+          )
+        }
+      }, error = function(e) NULL)
+    }
+
+    # ---- Seção: Não Paramétricos ----
+    if (isTRUE(input$rel_inc_np)) {
+      tryCatch({
+        res <- resultado_np()
+        if (!is.null(res)) {
+          r <- res$test
+          info <- paste0(
+            '<ul style="font-size:0.93rem;">',
+            '<li><strong>Teste:</strong> ', r$method, '</li>',
+            '<li><strong>Estatística:</strong> ',
+              names(r$statistic), ' = ', round(r$statistic, 4), '</li>',
+            '<li><strong>p-valor:</strong> ', formatC(r$p.value, digits=4, format="g"), '</li>',
+            '</ul>'
+          )
+          df <- res$df; vy <- res$var_y; vg <- res$var_g
+          p <- ggplot(df, aes(x = as.factor(.data[[vg]]), y = .data[[vy]],
+                              fill = as.factor(.data[[vg]]))) +
+            geom_boxplot(alpha = 0.55, outlier.colour = NA, color = "black") +
+            geom_jitter(width = 0.12, alpha = 0.6, size = 2) +
+            scale_fill_brewer(palette = "Set2") +
+            labs(x = vg, y = vy, fill = NULL) +
+            theme_minimal(base_size = 12) +
+            theme(legend.position = "none")
+          img_html <- gg_para_img_html(p)
+          partes[[length(partes) + 1]] <- secao_html(
+            "⚖️ Testes Não Paramétricos",
+            paste0(info, img_html)
+          )
+        }
+      }, error = function(e) NULL)
+    }
+
+    # ---- Seção: AUDPC ----
+    if (isTRUE(input$rel_inc_audpc)) {
+      tryCatch({
+        res <- audpc_calculada()
+        if (!is.null(res) && !is.null(res$df_curva)) {
+          df_c <- res$df_curva
+          g_col <- res$g_col
+          t_col <- res$t_col
+          s_col <- res$s_col
+          p <- ggplot(df_c, aes(x = .data[[t_col]], y = .data[[s_col]],
+                                color = .data[[g_col]], group = .data[[g_col]])) +
+            stat_summary(fun = mean, geom = "line", linewidth = 1.1) +
+            stat_summary(fun = mean, geom = "point", size = 3) +
+            scale_color_brewer(palette = "Set2") +
+            labs(x = t_col, y = s_col, color = g_col,
+                 title = "Curva de Progresso da Doença (média por grupo)") +
+            theme_minimal(base_size = 12) +
+            theme(panel.grid.minor = element_blank())
+          img_html <- gg_para_img_html(p)
+
+          tbl_html <- if (!is.null(res$df_audpc)) df_para_html(res$df_audpc) else ""
+          partes[[length(partes) + 1]] <- secao_html(
+            "🌱 AUDPC — Progresso da Doença",
+            paste0(img_html,
+                   '<h3 style="font-size:1rem;color:#555;margin-top:1rem;">Tabela AUDPC</h3>',
+                   tbl_html)
+          )
+        }
+      }, error = function(e) NULL)
+    }
+
+    # ---- Seção: Gráfico Customizado ----
+    if (isTRUE(input$rel_inc_graficos)) {
+      tryCatch({
+        p <- grafico_custom_gerado()
+        if (!is.null(p)) {
+          img_html <- gg_para_img_html(p, width = 900, height = 500)
+          partes[[length(partes) + 1]] <- secao_html(
+            "🎨 Gráfico Customizado (Editor Gráfico)", img_html
+          )
+        }
+      }, error = function(e) NULL)
+    }
+
+    # ---- Rodapé ----
+    partes[[length(partes) + 1]] <- paste0(
+      '<hr style="border-color:#dfe6e9;"/>',
+      '<p style="text-align:center;font-size:0.8rem;color:#b2bec3;">',
+      'Relatório gerado pelo App Análise Estatística Interativa &bull; ',
+      format(Sys.time(), "%d/%m/%Y %H:%M"), '</p>'
+    )
+
+    # Montar HTML completo
+    html_body <- paste(partes, collapse = "\n")
+    html_full <- paste0(
+      '<!DOCTYPE html><html lang="pt-BR"><head>',
+      '<meta charset="UTF-8"/>',
+      '<meta name="viewport" content="width=device-width, initial-scale=1"/>',
+      '<title>', htmltools::htmlEscape(input$rel_titulo), '</title>',
+      '<link rel="preconnect" href="https://fonts.googleapis.com">',
+      '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&',
+      'family=Outfit:wght@700&display=swap" rel="stylesheet">',
+      '<style>',
+      'body{font-family:Inter,sans-serif;max-width:960px;margin:0 auto;',
+      'padding:2rem;color:#2d3436;background:#f8faf9;}',
+      'h1,h2,h3{font-family:Outfit,sans-serif;}',
+      'table{width:100%;border-collapse:collapse;margin:1rem 0;}',
+      'th{background:#2C7A4B;color:white;padding:6px 10px;}',
+      'td{padding:5px 10px;border:1px solid #dee2e6;}',
+      'tr:nth-child(even){background:#f1f8f4;}',
+      'img{max-width:100%;height:auto;box-shadow:0 2px 8px rgba(0,0,0,.12);}',
+      '@media print{body{max-width:100%;padding:1rem;}}',
+      '</style></head><body>',
+      html_body,
+      '</body></html>'
+    )
+
+    relatorio_html_conteudo(html_full)
+    showNotification("✅ Relatório gerado com sucesso!", type = "message")
+  })
+
+  output$status_relatorio <- renderUI({
+    if (is.null(relatorio_html_conteudo())) {
+      div(class = "alert alert-warning",
+          icon("exclamation-triangle"),
+          " Configure as opções e clique em ",
+          tags$b("▶ Gerar Relatório"), " para visualizar o relatório.")
+    } else {
+      div(class = "alert alert-success",
+          icon("check-circle"),
+          " Relatório gerado! Você pode baixá-lo ou imprimi-lo como PDF com ",
+          tags$b("Ctrl+P"), " no browser.")
+    }
+  })
+
+  output$preview_relatorio_iframe <- renderUI({
+    req(relatorio_html_conteudo())
+    tags$iframe(srcdoc = relatorio_html_conteudo(),
+                style = "width:100%; height:600px; border:none;")
+  })
+
+  output$download_html <- downloadHandler(
+    filename = function() {
+      paste0("relatorio_fip606_", format(Sys.Date(), "%Y%m%d"), ".html")
+    },
+    content = function(file) {
+      html <- relatorio_html_conteudo()
+      if (is.null(html)) html <- "<p>Nenhum relatório gerado ainda. Clique em 'Gerar Relatório' primeiro.</p>"
+      writeLines(html, file, useBytes = TRUE)
+    },
+    contentType = "text/html"
+  )
+
+  # ---------------------------------------------------------------------------
+  # ABA 11 — EXPORTAR DADOS
+  # ---------------------------------------------------------------------------
+
+  tabela_exportar <- reactive({
+    fonte <- input$export_fonte
+    tryCatch({
+      switch(fonte,
+        brutos = {
+          req(dados())
+          dados()
+        },
+        resumo = {
+          req(dados(), input$var_resp_exp)
+          df <- dados()
+          var_y <- input$var_resp_exp
+          usar_grupo <- !is.null(input$var_grupo_exp) && input$var_grupo_exp != ""
+          if (usar_grupo) {
+            df |>
+              dplyr::group_by(.data[[input$var_grupo_exp]]) |>
+              dplyr::summarise(
+                n       = dplyr::n(),
+                Media   = round(mean(.data[[var_y]], na.rm = TRUE), 4),
+                Mediana = round(median(.data[[var_y]], na.rm = TRUE), 4),
+                DP      = round(sd(.data[[var_y]], na.rm = TRUE), 4),
+                EP      = round(DP / sqrt(n), 4),
+                Min     = round(min(.data[[var_y]], na.rm = TRUE), 4),
+                Max     = round(max(.data[[var_y]], na.rm = TRUE), 4),
+                .groups = "drop"
+              )
+          } else {
+            df |>
+              dplyr::summarise(
+                n       = dplyr::n(),
+                Media   = round(mean(.data[[var_y]], na.rm = TRUE), 4),
+                Mediana = round(median(.data[[var_y]], na.rm = TRUE), 4),
+                DP      = round(sd(.data[[var_y]], na.rm = TRUE), 4),
+                EP      = round(DP / sqrt(n), 4),
+                Min     = round(min(.data[[var_y]], na.rm = TRUE), 4),
+                Max     = round(max(.data[[var_y]], na.rm = TRUE), 4)
+              )
+          }
+        },
+        anova = {
+          res <- resultado_anova()
+          req(res)
+          as.data.frame(res$tabela) |>
+            dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~round(., 4)))
+        },
+        emmeans = {
+          res <- resultado_anova()
+          req(res)
+          as.data.frame(res$cld) |>
+            dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~round(., 4)))
+        },
+        audpc = {
+          res <- audpc_calculada()
+          req(res, res$df_audpc)
+          as.data.frame(res$df_audpc) |>
+            dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~round(., 4)))
+        },
+        teste_t = {
+          res <- resultado_tt()
+          req(res)
+          data.frame(
+            Teste = res$resultado$method,
+            Estatistica = as.numeric(res$resultado$statistic),
+            GL = if(!is.null(res$resultado$parameter)) as.numeric(res$resultado$parameter) else NA,
+            p_valor = res$resultado$p.value
+          ) |> dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~round(., 6)))
+        },
+        regressao = {
+          res <- resultado_reg()
+          req(res)
+          if (res$tipo == "cor") {
+            data.frame(
+              Teste = res$res$method,
+              Estimativa_r = as.numeric(res$res$estimate),
+              p_valor = res$res$p.value
+            ) |> dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~round(., 6)))
+          } else {
+            as.data.frame(res$tidy) |>
+              dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~round(., 4)))
+          }
+        },
+        glm = {
+          res <- resultado_glm()
+          req(res, res$results$glm_poisson)
+          as.data.frame(res$results$glm_poisson$cld) |>
+            dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~round(., 4)))
+        },
+        nao_param = {
+          res <- resultado_np()
+          req(res)
+          data.frame(
+            Teste      = res$test$method,
+            Estatistica = as.numeric(res$test$statistic),
+            p_valor    = res$test$p.value
+          ) |> dplyr::mutate(dplyr::across(dplyr::where(is.numeric), ~round(., 6)))
+        }
+      )
+    }, error = function(e) {
+      showNotification(
+        paste0("Rode a análise correspondente antes de exportar: ", e$message),
+        type = "warning"
+      )
+      NULL
+    })
+  })
+
+  output$preview_exportar <- renderDT({
+    df <- tabela_exportar()
+    req(df)
+    datatable(
+      df,
+      options = list(pageLength = 15, scrollX = TRUE, dom = "lfrtip"),
+      class = "table-striped table-hover table-sm",
+      rownames = FALSE
+    )
+  })
+
+  output$download_exportar <- downloadHandler(
+    filename = function() {
+      ext <- switch(input$export_formato,
+                    csv  = ".csv",
+                    xlsx = ".xlsx",
+                    txt  = ".txt")
+      paste0("fip606_", input$export_fonte, "_", Sys.Date(), ext)
+    },
+    content = function(file) {
+      df <- tabela_exportar()
+      req(df)
+      fmt <- input$export_formato
+      if (fmt == "csv") {
+        sep_val <- input$export_sep
+        dec_val <- input$export_dec
+        write.table(df, file, sep = sep_val, dec = dec_val,
+                    row.names = FALSE, quote = TRUE, fileEncoding = "UTF-8")
+      } else if (fmt == "xlsx") {
+        if (requireNamespace("openxlsx", quietly = TRUE)) {
+          wb <- openxlsx::createWorkbook()
+          openxlsx::addWorksheet(wb, "Dados")
+          openxlsx::writeData(wb, "Dados", df)
+          openxlsx::saveWorkbook(wb, file, overwrite = TRUE)
+        } else {
+          # Fallback: CSV com extensão .xlsx (avisando)
+          write.csv(df, file, row.names = FALSE)
+          showNotification("Pacote 'openxlsx' não encontrado. Arquivo salvo como CSV.",
+                           type = "warning")
+        }
+      } else {
+        # TXT formatado
+        sink_output <- capture.output({
+          cat("===  Exportação de Dados ==========================\n")
+          cat("Tabela:", input$export_fonte, "\n")
+          cat("Data:", as.character(Sys.Date()), "\n")
+          cat("============================================================\n\n")
+          print(df)
+        })
+        writeLines(sink_output, file)
+      }
     }
   )
 
